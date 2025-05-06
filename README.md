@@ -1,4 +1,4 @@
-# MkDocs Site URLs Plugin
+# MkDocs resolve absolute URLs Plugin
 
 ![GitHub release](https://img.shields.io/github/v/release/OctoPrint/mkdocs-site-urls?logo=github&logoColor=white)
 ![PyPI](https://img.shields.io/pypi/v/mkdocs-site-urls?logo=python&logoColor=white)
@@ -8,7 +8,7 @@
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1)](https://pycqa.github.io/isort/)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 
-A MkDocs plugin that adds support for site-relative `site:` URLs.
+A MkDocs plugin to resolve absolute URLs relative to the `site_url` value in the MkDocs configuration, rather than the root url of the website.
 
 Example:
 
