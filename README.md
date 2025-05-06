@@ -32,3 +32,7 @@ plugins:
 The ACCESS-Hive Docs website is covered by the [CC-BY 4.0 license](https://creativecommons.org/licenses/by/4.0/legalcode).
 
 However, the material linked to from ACCESS-Hive Docs is covered by various licensing agreements. Our users should directly refer to the terms and conditions of any material they are using to understand their rights and responsibilities.
+
+## Ackowledgements
+This project is based on work from [OctoPrint/mkdocs-site-urls](https://github.com/OctoPrint/mkdocs-site-urls).  
+We thank the original authors for their contributions and for making their work available under an open license.
