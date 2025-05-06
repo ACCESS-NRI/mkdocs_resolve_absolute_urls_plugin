@@ -10,7 +10,7 @@ logger = mkdocs.plugins.get_plugin_logger(__name__)
 
 class Config(mkdocs.config.base.Config):
     attributes = c.Type(list, default=["href", "src", "data"])
-    prefix = c.Type(str, default="site:")
+    prefix = c.Type(str, default="/")
 
 
 class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
