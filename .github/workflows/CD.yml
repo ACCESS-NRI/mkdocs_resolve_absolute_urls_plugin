@@ -16,8 +16,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-tags: true
 
       - name: Check tag
         id: check-tag
@@ -39,6 +37,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref }}
           fetch-tags: true
 
       - name: Version sanity check
@@ -87,9 +86,6 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-        with:
-          fetch-tags: true
-          fetch-depth: 0
 
       - name: Get name
         id: get-package-name
@@ -128,18 +124,34 @@ jobs:
     name: Cleanup tag
     needs: [check-release-tag, version-sanity-check, get-package-name]
     # Run this job if the tag is a release tag and any of the previous jobs failed (and don't skip if any of the needed jobs is skipped)
-    if: ${{ ( always() && failure() && needs.check-release-tag.outputs.is_release_tag == 'true') || cancelled() }}
+    if: ${{ ( always() && failure() && ( needs.check-release-tag.result != 'success' || needs.check-release-tag.outputs.is_release_tag == 'true') ) || cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-tags: true
 
       - name: Delete tag
         run: |
           git push origin :${{ github.ref }}
           echo "A job in the current workflow failed. Tag '${{ github.ref_name }}' was deleted."
-        
+
+  create-release:
+    name: Create release
+    needs: [check-release-tag, version-sanity-check, get-package-name]
+    if: ${{ needs.check-release-tag.outputs.is_release_tag == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 #v2.0.8
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{needs.get-package-name.outputs.package-name}} ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
