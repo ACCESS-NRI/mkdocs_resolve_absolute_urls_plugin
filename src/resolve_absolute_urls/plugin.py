@@ -33,17 +33,15 @@ class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
 
     @mkdocs.plugins.event_priority(50)
     def on_page_content(self, html, page, config, files):
-        site_url = urllib.parse.urlparse(config["site_url"]).path
-        if not site_url:
-            site_url = "/"
-        elif not site_url.endswith("/"):
+        site_url = config["site_url"]
+        if not site_url.endswith("/"):
             site_url += "/"
-
+        path = urllib.parse.urlparse(site_url).path
         def _replacer(match):
             attribute = match.group(1)
             url = match.group(3)
 
-            logger.info(f"Replacing absolute url '{self.prefix}{url}' with '{site_url}{url}'")
-            return f'{attribute}="{site_url}{url}"'
+            logger.info(f"Replacing absolute url '{self.prefix}{url}' with '{path}{url}'")
+            return f'{attribute}="{path}{url}"'
 
         return self._regex.sub(_replacer, html)
