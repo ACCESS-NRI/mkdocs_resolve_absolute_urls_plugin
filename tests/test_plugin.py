@@ -114,7 +114,15 @@ def test_on_config_sets_regex(
     else:
         assert match is None
 
-def test_on_page_content(create_plugin):
+@pytest.mark.parametrize(
+    "site_url",
+    [
+        "https://example.com/docs/subpage/",
+        "https://example.com/docs/subpage",
+    ],
+    ids=["trailing_slash", "no_trailing_slash"],
+)
+def test_on_page_content(create_plugin, site_url):
     """Test the on_page_content method of the ResolveAbsoluteUrlsPlugin."""
     plugin = create_plugin({
         "attributes": ["src", "data"],
@@ -122,8 +130,7 @@ def test_on_page_content(create_plugin):
     })
     page = MagicMock()
     config = MagicMock()
-    config.__getitem__.side_effect = lambda key: "https://example.com/docs/subpage" if key == "site_url" else None
-    print(config["site_url"])
+    config.__getitem__.side_effect = lambda key: site_url if key == "site_url" else None
     files = MagicMock()
     html = '''
     <img src  ="prefixexample.png" alt="Image">
