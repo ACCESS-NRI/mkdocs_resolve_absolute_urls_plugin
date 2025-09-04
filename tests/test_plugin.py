@@ -122,7 +122,7 @@ def test_on_config_sets_regex(
     ],
     ids=["trailing_slash", "no_trailing_slash"],
 )
-def test_on_page_content(create_plugin, site_url):
+def test_on_post_page(create_plugin, site_url):
     """Test the on_page_content method of the ResolveAbsoluteUrlsPlugin."""
     plugin = create_plugin({
         "attributes": ["src", "data"],
@@ -131,8 +131,7 @@ def test_on_page_content(create_plugin, site_url):
     page = MagicMock()
     config = MagicMock()
     config.__getitem__.side_effect = lambda key: site_url if key == "site_url" else None
-    files = MagicMock()
-    html = '''
+    output = '''
     <img src  ="prefixexample.png" alt="Image">
     <img data =  \'prefix/image.png\'>
     <img data="site:docs/image.svg" class="example">
@@ -140,7 +139,7 @@ def test_on_page_content(create_plugin, site_url):
     '''
 
     plugin.on_config(config)
-    result = plugin.on_page_content(html, page, config, files)
+    result = plugin.on_post_page(output, page, config)
     expected_result = '''
     <img src="/docs/subpage/example.png" alt="Image">
     <img data="/docs/subpage//image.png">
