@@ -7,8 +7,8 @@ For example:
 
 | absolute URL | site_url | resulting URL |
 | --- | -------- | ------------- |
-| `/images/foo.png` | `https://example.com/` | `/images/foo.png` |
-| `/images/foo.png` | `https://example.com/subpage/` | `/subpage/images/foo.png` |
+| `/images/foo.png` | `https://example.com/` | `https://example.com/images/foo.png` |
+| `/images/foo.png` | `https://example.com/subpage/` | `https://example.com/subpage/images/foo.png` |
 
 ## Configuration
 
