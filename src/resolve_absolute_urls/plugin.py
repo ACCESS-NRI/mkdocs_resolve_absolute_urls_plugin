@@ -31,17 +31,16 @@ class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
         self._regex = re.compile(regex, re.IGNORECASE)
         return config
 
-    @mkdocs.plugins.event_priority(50)
-    def on_page_content(self, html, page, config, files):
+    def on_post_page(self, output, page, config):
         site_url = config["site_url"]
         if not site_url.endswith("/"):
             site_url += "/"
         path = urllib.parse.urlparse(site_url).path
+        
         def _replacer(match):
             attribute = match.group(1)
             url = match.group(3)
-
             logger.info(f"Replacing absolute url '{self.prefix}{url}' with '{path}{url}'")
             return f'{attribute}="{path}{url}"'
 
-        return self._regex.sub(_replacer, html)
+        return self._regex.sub(_replacer, output)
