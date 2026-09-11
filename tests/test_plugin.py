@@ -92,6 +92,7 @@ def create_plugin(mock_plugin_config):
 )
 def test_on_config_sets_regex(
     create_plugin,
+    monkeypatch,
     attributes,
     prefix,
     string_to_match,
@@ -100,6 +101,9 @@ def test_on_config_sets_regex(
     should_match,
 ):
     """Test the on_config method of the ResolveAbsoluteUrlsPlugin."""
+    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
+
     plugin_config = {
         "attributes": attributes,
         "prefix": prefix,
@@ -124,12 +128,6 @@ def test_on_config_sets_regex(
     "env_version, env_language, link, expected_link",
     [
         (
-            None,
-            None,
-            "/my/absolute/link.png",
-            "/docs/my/absolute/link.png",
-        ),  # no_version_no_locale
-        (
             "v2.0",
             "fr",
             "/my/absolute/link.png",
@@ -153,34 +151,20 @@ def test_on_config_sets_regex(
             "/!de/@v3.0/my/absolute/link.png",
             "/docs/de/v3.0/my/absolute/link.png",
         ),  # locale_and_version_override
-        (
-            None,
-            None,
-            "/!de/@v3.0/my/absolute/link.png",
-            "/docs/de/v3.0/my/absolute/link.png",
-        ),  # override_without_env_vars
     ],
     ids=[
-        "no_version_no_locale",
         "version_and_locale_from_env",
         "locale_override_only",
         "version_override_only",
         "locale_and_version_override",
-        "override_without_env_vars",
     ],
 )
 def test_on_post_page(
     create_plugin, monkeypatch, env_version, env_language, link, expected_link
 ):
     """Test the on_post_page method resolves the current/overridden version and locale."""
-    if env_version is None:
-        monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
-    else:
-        monkeypatch.setenv("READTHEDOCS_VERSION", env_version)
-    if env_language is None:
-        monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
-    else:
-        monkeypatch.setenv("READTHEDOCS_LANGUAGE", env_language)
+    monkeypatch.setenv("READTHEDOCS_VERSION", env_version)
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", env_language)
 
     plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
     page = MagicMock()
@@ -196,15 +180,15 @@ def test_on_post_page(
 
 def test_on_post_page_url_trailing_slash_is_ignored(create_plugin, monkeypatch):
     """Test that a trailing slash on the `base_url` option does not affect the result."""
-    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
-    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
     plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs/"})
     page = MagicMock()
     config = MagicMock()
 
     output = '<img src="/image.png">'
-    expected_result = '<img src="/docs/image.png">'
+    expected_result = '<img src="/docs/en/v1.0/image.png">'
 
     plugin.on_config(config)
     result = plugin.on_post_page(output, page, config)
@@ -213,8 +197,8 @@ def test_on_post_page_url_trailing_slash_is_ignored(create_plugin, monkeypatch):
 
 def test_on_post_page_unmatched_attributes_are_untouched(create_plugin, monkeypatch):
     """Test that attributes/urls not matching the plugin configuration are left as-is."""
-    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
-    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
     plugin = create_plugin({"attributes": ["data"], "prefix": "prefix", "base_url": "/docs"})
     page = MagicMock()
@@ -233,15 +217,15 @@ def test_on_post_page_unmatched_attributes_are_untouched(create_plugin, monkeypa
 def test_on_config_falls_back_to_readthedocs_canonical_url(create_plugin, monkeypatch):
     """Test that `base_url` defaults to the READTHEDOCS_CANONICAL_URL env var when not configured."""
     monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "https://example.com/docs/")
-    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
-    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
     plugin = create_plugin({"attributes": ["src"], "prefix": "/"})
     page = MagicMock()
     config = MagicMock()
 
     output = '<img src="/image.png">'
-    expected_result = '<img src="https://example.com/docs/image.png">'
+    expected_result = '<img src="https://example.com/docs/en/v1.0/image.png">'
 
     plugin.on_config(config)
     result = plugin.on_post_page(output, page, config)
@@ -253,6 +237,8 @@ def test_on_config_prefers_explicit_url_over_readthedocs_canonical_url(
 ):
     """Test that an explicitly configured `base_url` takes precedence over the env var."""
     monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "https://example.com/other/")
+    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
     plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
 
@@ -266,6 +252,50 @@ def test_on_config_raises_when_no_url_is_available(create_plugin, monkeypatch):
     monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
 
     plugin = create_plugin({"attributes": ["src"], "prefix": "/"})
+
+    with pytest.raises(ConfigurationError):
+        plugin.on_config(MagicMock())
+
+
+def test_on_config_raises_when_readthedocs_version_missing(create_plugin, monkeypatch):
+    """Test that a ConfigurationError is raised when READTHEDOCS_VERSION is not set."""
+    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+
+    with pytest.raises(ConfigurationError):
+        plugin.on_config(MagicMock())
+
+
+def test_on_config_raises_when_readthedocs_language_missing(create_plugin, monkeypatch):
+    """Test that a ConfigurationError is raised when READTHEDOCS_LANGUAGE is not set."""
+    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
+    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+
+    with pytest.raises(ConfigurationError):
+        plugin.on_config(MagicMock())
+
+
+def test_on_config_raises_when_readthedocs_version_empty(create_plugin, monkeypatch):
+    """Test that a ConfigurationError is raised when READTHEDOCS_VERSION is set but empty."""
+    monkeypatch.setenv("READTHEDOCS_VERSION", "")
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+
+    with pytest.raises(ConfigurationError):
+        plugin.on_config(MagicMock())
+
+
+def test_on_config_raises_when_readthedocs_language_empty(create_plugin, monkeypatch):
+    """Test that a ConfigurationError is raised when READTHEDOCS_LANGUAGE is set but empty."""
+    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "")
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
 
     with pytest.raises(ConfigurationError):
         plugin.on_config(MagicMock())

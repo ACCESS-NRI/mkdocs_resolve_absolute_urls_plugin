@@ -50,6 +50,11 @@ class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
         # Current version/locale of the build, used as defaults when not overridden in the link.
         self._env_version = os.environ.get("READTHEDOCS_VERSION")
         self._env_language = os.environ.get("READTHEDOCS_LANGUAGE")
+        if not self._env_version or not self._env_language:
+            raise ConfigurationError(
+                "The 'resolve-absolute-urls' plugin requires the 'READTHEDOCS_VERSION' and "
+                "'READTHEDOCS_LANGUAGE' environment variables to be set."
+            )
         return config
 
     def on_post_page(self, output, page, config):
