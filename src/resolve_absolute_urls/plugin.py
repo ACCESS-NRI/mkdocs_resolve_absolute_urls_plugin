@@ -9,9 +9,9 @@ logger = mkdocs.plugins.get_plugin_logger(__name__)
 
 
 class Config(mkdocs.config.base.Config):
+    url = c.Type(str)
     attributes = c.Type(list, default=["href", "src", "data"])
     prefix = c.Type(str, default="/")
-    url = c.Type(str, required=True)
 
 
 class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
