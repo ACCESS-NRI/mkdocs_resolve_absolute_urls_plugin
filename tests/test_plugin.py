@@ -7,7 +7,7 @@ from resolve_absolute_urls.plugin import ResolveAbsoluteUrlsPlugin
 
 @pytest.fixture
 def mock_plugin_config():
-    return {"attributes": ["src", "href"], "prefix": "/"}
+    return {"attributes": ["src", "href"], "prefix": "/", "url": "/docs"}
 
 
 @pytest.fixture
@@ -98,6 +98,7 @@ def test_on_config_sets_regex(
     plugin_config = {
         "attributes": attributes,
         "prefix": prefix,
+        "url": "/docs",
     }
     plugin = create_plugin(plugin_config)
     plugin.on_config(MagicMock())
@@ -115,35 +116,110 @@ def test_on_config_sets_regex(
         assert match is None
 
 @pytest.mark.parametrize(
-    "site_url",
+    "env_version, env_language, link, expected_link",
     [
-        "https://example.com/docs/subpage/",
-        "https://example.com/docs/subpage",
+        (
+            None,
+            None,
+            "/my/absolute/link.png",
+            "/docs/my/absolute/link.png",
+        ),  # no_version_no_locale
+        (
+            "v2.0",
+            "fr",
+            "/my/absolute/link.png",
+            "/docs/fr/v2.0/my/absolute/link.png",
+        ),  # version_and_locale_from_env
+        (
+            "v2.0",
+            "fr",
+            "/!de/my/absolute/link.png",
+            "/docs/de/v2.0/my/absolute/link.png",
+        ),  # locale_override_only
+        (
+            "v2.0",
+            "fr",
+            "/@v3.0/my/absolute/link.png",
+            "/docs/fr/v3.0/my/absolute/link.png",
+        ),  # version_override_only
+        (
+            "v2.0",
+            "fr",
+            "/!de/@v3.0/my/absolute/link.png",
+            "/docs/de/v3.0/my/absolute/link.png",
+        ),  # locale_and_version_override
+        (
+            None,
+            None,
+            "/!de/@v3.0/my/absolute/link.png",
+            "/docs/de/v3.0/my/absolute/link.png",
+        ),  # override_without_env_vars
     ],
-    ids=["trailing_slash", "no_trailing_slash"],
+    ids=[
+        "no_version_no_locale",
+        "version_and_locale_from_env",
+        "locale_override_only",
+        "version_override_only",
+        "locale_and_version_override",
+        "override_without_env_vars",
+    ],
 )
-def test_on_post_page(create_plugin, site_url):
-    """Test the on_page_content method of the ResolveAbsoluteUrlsPlugin."""
-    plugin = create_plugin({
-        "attributes": ["src", "data"],
-        "prefix": "prefix",
-    })
+def test_on_post_page(
+    create_plugin, monkeypatch, env_version, env_language, link, expected_link
+):
+    """Test the on_post_page method resolves the current/overridden version and locale."""
+    if env_version is None:
+        monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
+    else:
+        monkeypatch.setenv("READTHEDOCS_VERSION", env_version)
+    if env_language is None:
+        monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+    else:
+        monkeypatch.setenv("READTHEDOCS_LANGUAGE", env_language)
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "url": "/docs"})
     page = MagicMock()
     config = MagicMock()
-    config.__getitem__.side_effect = lambda key: site_url if key == "site_url" else None
+
+    output = f'<img src="{link}" alt="Image">'
+    expected_result = f'<img src="{expected_link}" alt="Image">'
+
+    plugin.on_config(config)
+    result = plugin.on_post_page(output, page, config)
+    assert result == expected_result
+
+
+def test_on_post_page_url_trailing_slash_is_ignored(create_plugin, monkeypatch):
+    """Test that a trailing slash on the `url` option does not affect the result."""
+    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
+    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "url": "/docs/"})
+    page = MagicMock()
+    config = MagicMock()
+
+    output = '<img src="/image.png">'
+    expected_result = '<img src="/docs/image.png">'
+
+    plugin.on_config(config)
+    result = plugin.on_post_page(output, page, config)
+    assert result == expected_result
+
+
+def test_on_post_page_unmatched_attributes_are_untouched(create_plugin, monkeypatch):
+    """Test that attributes/urls not matching the plugin configuration are left as-is."""
+    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
+    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+
+    plugin = create_plugin({"attributes": ["data"], "prefix": "prefix", "url": "/docs"})
+    page = MagicMock()
+    config = MagicMock()
+
     output = '''
-    <img src  ="prefixexample.png" alt="Image">
-    <img data =  \'prefix/image.png\'>
     <img data="site:docs/image.svg" class="example">
     <img attr  ="prefix/docs/image.png" >
     '''
 
     plugin.on_config(config)
     result = plugin.on_post_page(output, page, config)
-    expected_result = '''
-    <img src="/docs/subpage/example.png" alt="Image">
-    <img data="/docs/subpage//image.png">
-    <img data="site:docs/image.svg" class="example">
-    <img attr  ="prefix/docs/image.png" >
-    '''
-    assert result == expected_result
+    assert result == output

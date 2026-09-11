@@ -1,21 +1,34 @@
 # MkDocs resolve absolute URLs Plugin
 
 ## About
-A MkDocs plugin to resolve absolute URLs relative to the `site_url` value in the MkDocs configuration, rather than the root url of the website.
+A MkDocs plugin to resolve absolute URLs relative to a configured `url`, rather than the root url of the website.
 
 For example:
 
-| absolute URL | site_url | resulting URL |
+| absolute URL | url | resulting URL |
 | --- | -------- | ------------- |
-| `/images/foo.png` | `https://example.com/` | `https://example.com/images/foo.png` |
-| `/images/foo.png` | `https://example.com/subpage/` | `https://example.com/subpage/images/foo.png` |
+| `/images/foo.png` | `/` | `/images/foo.png` |
+| `/images/foo.png` | `/subpage/` | `/subpage/images/foo.png` |
+
+### Locales and versions
+If the site is built with multiple versions/locales (e.g. via [Read the Docs](https://readthedocs.org/)), the current version and locale are read from the `READTHEDOCS_VERSION` and `READTHEDOCS_LANGUAGE` environment variables and appended to `url` (which should not itself contain a version/locale), before the rest of the link.
+
+You can also link to a specific locale and/or version, instead of the current one, by prefixing the absolute link with `!locale` and/or `@version`, e.g.:
+
+| absolute URL | resulting link (relative to `url`) |
+| --- | --- |
+| `/my/page` | current locale/version, e.g. `/en/latest/my/page` |
+| `/!fr/my/page` | `fr` locale, current version, e.g. `/fr/latest/my/page` |
+| `/@v2.0/my/page` | current locale, `v2.0` version, e.g. `/en/v2.0/my/page` |
+| `/!fr/@v2.0/my/page` | `fr` locale, `v2.0` version, e.g. `/fr/v2.0/my/page` |
 
 ## Configuration
 
 | Name | Description | Default value |
-| ---------------- | ----------- | -------- | ------------- |
+| ---------------- | ----------- | -------- |
 | `attributes` | The HTML attributes whose absolute URLs will be resolved. | `["href", "src", "data"]` |
 | `prefix` | Prefix used to denote the absolute URLs. If the URLs starts with this `prefix`, it will be resolved.| `/` |
+| `url` | The url to prepend to the resolved absolute URLs. **Required**. | |
 
 ## Example usage
 
@@ -26,6 +39,7 @@ plugins:
         - href
         - data-url
       prefix: /
+      url: /docs/
 ```
 
 ## License
