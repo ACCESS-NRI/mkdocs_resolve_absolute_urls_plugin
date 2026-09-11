@@ -12,7 +12,7 @@ from resolve_absolute_urls.plugin import ResolveAbsoluteUrlsPlugin
 
 @pytest.fixture
 def mock_plugin_config():
-    return {"attributes": ["src", "href"], "prefix": "/", "base_url": "/docs"}
+    return {"attributes": ["src", "href"], "prefix": "/", "root_url": "/docs"}
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_on_config_sets_regex(
     plugin_config = {
         "attributes": attributes,
         "prefix": prefix,
-        "base_url": "/docs",
+        "root_url": "/docs",
     }
     plugin = create_plugin(plugin_config)
     plugin.on_config(MagicMock())
@@ -166,7 +166,7 @@ def test_on_post_page(
     monkeypatch.setenv("READTHEDOCS_VERSION", env_version)
     monkeypatch.setenv("READTHEDOCS_LANGUAGE", env_language)
 
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
     page = MagicMock()
     config = MagicMock()
 
@@ -179,11 +179,11 @@ def test_on_post_page(
 
 
 def test_on_post_page_url_trailing_slash_is_ignored(create_plugin, monkeypatch):
-    """Test that a trailing slash on the `base_url` option does not affect the result."""
+    """Test that a trailing slash on the `root_url` option does not affect the result."""
     monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
     monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs/"})
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs/"})
     page = MagicMock()
     config = MagicMock()
 
@@ -200,7 +200,7 @@ def test_on_post_page_unmatched_attributes_are_untouched(create_plugin, monkeypa
     monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
     monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
-    plugin = create_plugin({"attributes": ["data"], "prefix": "prefix", "base_url": "/docs"})
+    plugin = create_plugin({"attributes": ["data"], "prefix": "prefix", "root_url": "/docs"})
     page = MagicMock()
     config = MagicMock()
 
@@ -215,7 +215,7 @@ def test_on_post_page_unmatched_attributes_are_untouched(create_plugin, monkeypa
 
 
 def test_on_config_falls_back_to_readthedocs_canonical_url(create_plugin, monkeypatch):
-    """Test that `base_url` defaults to the READTHEDOCS_CANONICAL_URL env var when not configured."""
+    """Test that `root_url` defaults to the READTHEDOCS_CANONICAL_URL env var when not configured."""
     monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "https://example.com/docs/")
     monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
     monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
@@ -235,19 +235,19 @@ def test_on_config_falls_back_to_readthedocs_canonical_url(create_plugin, monkey
 def test_on_config_prefers_explicit_url_over_readthedocs_canonical_url(
     create_plugin, monkeypatch
 ):
-    """Test that an explicitly configured `base_url` takes precedence over the env var."""
+    """Test that an explicitly configured `root_url` takes precedence over the env var."""
     monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "https://example.com/other/")
     monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
     monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
 
     plugin.on_config(MagicMock())
-    assert plugin._base_url == "/docs"
+    assert plugin._root_url == "/docs"
 
 
 def test_on_config_raises_when_no_url_is_available(create_plugin, monkeypatch):
-    """Test that a ConfigurationError is raised when `base_url` is not configured and the
+    """Test that a ConfigurationError is raised when `root_url` is not configured and the
     READTHEDOCS_CANONICAL_URL env var is not set."""
     monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
 
@@ -262,7 +262,7 @@ def test_on_config_raises_when_readthedocs_version_missing(create_plugin, monkey
     monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
     monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
 
     with pytest.raises(ConfigurationError):
         plugin.on_config(MagicMock())
@@ -273,7 +273,7 @@ def test_on_config_raises_when_readthedocs_language_missing(create_plugin, monke
     monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
     monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
 
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
 
     with pytest.raises(ConfigurationError):
         plugin.on_config(MagicMock())
@@ -284,7 +284,7 @@ def test_on_config_raises_when_readthedocs_version_empty(create_plugin, monkeypa
     monkeypatch.setenv("READTHEDOCS_VERSION", "")
     monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
 
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
 
     with pytest.raises(ConfigurationError):
         plugin.on_config(MagicMock())
@@ -295,7 +295,7 @@ def test_on_config_raises_when_readthedocs_language_empty(create_plugin, monkeyp
     monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
     monkeypatch.setenv("READTHEDOCS_LANGUAGE", "")
 
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "base_url": "/docs"})
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
 
     with pytest.raises(ConfigurationError):
         plugin.on_config(MagicMock())
@@ -342,7 +342,7 @@ def test_plugin_real_case(tmp_path, monkeypatch):
               - resolve-absolute-urls:
                   attributes: [href, src]
                   prefix: /
-                  base_url: /docs
+                  root_url: /docs
             """
         )
     )
