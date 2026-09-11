@@ -1,8 +1,12 @@
 import re
+import textwrap
 
 import pytest
 
 from unittest.mock import MagicMock
+
+from mkdocs.commands.build import build
+from mkdocs.config import load_config
 from resolve_absolute_urls.plugin import ResolveAbsoluteUrlsPlugin
 
 @pytest.fixture
@@ -223,3 +227,62 @@ def test_on_post_page_unmatched_attributes_are_untouched(create_plugin, monkeypa
     plugin.on_config(config)
     result = plugin.on_post_page(output, page, config)
     assert result == output
+
+
+def test_plugin_real_case(tmp_path, monkeypatch):
+    """Run the plugin through an actual `mkdocs build` on a versioned/localized
+    Read the Docs build, mixing several attributes, locale/version overrides
+    and links that should be left untouched."""
+    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.2")
+    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
+
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "index.md").write_text(
+        textwrap.dedent(
+            """\
+            # Home
+
+            ![Logo](/images/logo.png)
+
+            [Getting started](/guide/getting-started/)
+
+            [Getting started (French)](/!fr/guide/getting-started/)
+
+            [Migration guide](/@v2.0/guide/migration/)
+
+            [External link](https://example.com/external)
+
+            [Relative link](relative.md)
+            """
+        )
+    )
+    (docs_dir / "relative.md").write_text("# Relative page\n")
+
+    mkdocs_yml = tmp_path / "mkdocs.yml"
+    mkdocs_yml.write_text(
+        textwrap.dedent(
+            """\
+            site_name: Test site
+            docs_dir: docs
+            site_dir: site
+            plugins:
+              - resolve-absolute-urls:
+                  attributes: [href, src]
+                  prefix: /
+                  url: /docs
+            """
+        )
+    )
+
+    config = load_config(config_file=str(mkdocs_yml))
+    build(config)
+
+    output = (tmp_path / "site" / "index.html").read_text()
+
+    assert 'src="/docs/en/v1.2/images/logo.png"' in output
+    assert 'href="/docs/en/v1.2/guide/getting-started/"' in output
+    assert 'href="/docs/fr/v1.2/guide/getting-started/"' in output
+    assert 'href="/docs/en/v2.0/guide/migration/"' in output
+    assert 'href="https://example.com/external"' in output
+    assert 'href="relative/"' in output
