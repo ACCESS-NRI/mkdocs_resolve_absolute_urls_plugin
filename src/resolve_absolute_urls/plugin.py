@@ -10,7 +10,7 @@ logger = mkdocs.plugins.get_plugin_logger(__name__)
 
 
 class Config(mkdocs.config.base.Config):
-    url = c.Type(str, default=None)
+    base_url = c.Type(str, default="")
     attributes = c.Type(list, default=["href", "src", "data"])
     prefix = c.Type(str, default="/")
 
@@ -38,15 +38,15 @@ class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
         regex = "".join(regex_parts)
         self._regex = re.compile(regex, re.IGNORECASE)
 
-        url = self.config["url"]
-        if not url:
-            url = os.environ.get("READTHEDOCS_CANONICAL_URL")
-        if not url:
+        base_url = self.config["base_url"]
+        if not base_url:
+            base_url = os.environ.get("READTHEDOCS_CANONICAL_URL")
+        if not base_url:
             raise ConfigurationError(
-                "The 'resolve-absolute-urls' plugin requires a 'url' to be configured, "
+                "The 'resolve-absolute-urls' plugin requires a 'base_url' to be configured, "
                 "or the 'READTHEDOCS_CANONICAL_URL' environment variable to be set."
             )
-        self._base_url = url.rstrip("/")
+        self._base_url = base_url.rstrip("/")
         # Current version/locale of the build, used as defaults when not overridden in the link.
         self._env_version = os.environ.get("READTHEDOCS_VERSION")
         self._env_language = os.environ.get("READTHEDOCS_LANGUAGE")
