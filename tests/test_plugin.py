@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from mkdocs.commands.build import build
 from mkdocs.config import load_config
+from mkdocs.exceptions import ConfigurationError
 from resolve_absolute_urls.plugin import ResolveAbsoluteUrlsPlugin
 
 @pytest.fixture
@@ -227,6 +228,47 @@ def test_on_post_page_unmatched_attributes_are_untouched(create_plugin, monkeypa
     plugin.on_config(config)
     result = plugin.on_post_page(output, page, config)
     assert result == output
+
+
+def test_on_config_falls_back_to_readthedocs_canonical_url(create_plugin, monkeypatch):
+    """Test that `url` defaults to the READTHEDOCS_CANONICAL_URL env var when not configured."""
+    monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "https://example.com/docs/")
+    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
+    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/"})
+    page = MagicMock()
+    config = MagicMock()
+
+    output = '<img src="/image.png">'
+    expected_result = '<img src="https://example.com/docs/image.png">'
+
+    plugin.on_config(config)
+    result = plugin.on_post_page(output, page, config)
+    assert result == expected_result
+
+
+def test_on_config_prefers_explicit_url_over_readthedocs_canonical_url(
+    create_plugin, monkeypatch
+):
+    """Test that an explicitly configured `url` takes precedence over the env var."""
+    monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "https://example.com/other/")
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "url": "/docs"})
+
+    plugin.on_config(MagicMock())
+    assert plugin._base_url == "/docs"
+
+
+def test_on_config_raises_when_no_url_is_available(create_plugin, monkeypatch):
+    """Test that a ConfigurationError is raised when `url` is not configured and the
+    READTHEDOCS_CANONICAL_URL env var is not set."""
+    monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/"})
+
+    with pytest.raises(ConfigurationError):
+        plugin.on_config(MagicMock())
 
 
 def test_plugin_real_case(tmp_path, monkeypatch):

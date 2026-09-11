@@ -28,7 +28,7 @@ You can also link to a specific locale and/or version, instead of the current on
 | ---------------- | ----------- | -------- |
 | `attributes` | The HTML attributes whose absolute URLs will be resolved. | `["href", "src", "data"]` |
 | `prefix` | Prefix used to denote the absolute URLs. If the URLs starts with this `prefix`, it will be resolved.| `/` |
-| `url` | The url to prepend to the resolved absolute URLs. **Required**. | |
+| `url` | The url to prepend to the resolved absolute URLs. If not set, it defaults to the [Read the Docs](https://readthedocs.org/) `READTHEDOCS_CANONICAL_URL` environment variable. | |
 
 ## Example usage
 
