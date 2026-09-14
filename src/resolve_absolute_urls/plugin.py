@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 
 import mkdocs.plugins
 from mkdocs.config import config_options as c
@@ -22,6 +23,12 @@ class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
         r"^(?:!(?P<locale>[^/]+)/)?(?:@(?P<version>[^/]+)/)?(?P<path>.*)$", re.DOTALL
     )
 
+    def on_startup(self, *, command, dirty):
+        if command == 'serve':
+            self.is_serving = True
+        else:
+            self.is_serving = False
+
     def on_config(self, config: MkDocsConfig) -> MkDocsConfig:
         attributes = (re.escape(attr) for attr in self.config["attributes"])
         self.prefix = re.escape(self.config["prefix"])
@@ -40,17 +47,17 @@ class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
 
         root_url = self.config["root_url"]
         if not root_url:
-            root_url = os.environ.get("READTHEDOCS_CANONICAL_URL")
-        if not root_url:
+            root_url = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
+        if not root_url and not self.is_serving:
             raise ConfigurationError(
                 "The 'resolve-absolute-urls' plugin requires a 'root_url' to be configured, "
                 "or the 'READTHEDOCS_CANONICAL_URL' environment variable to be set."
             )
         self._root_url = root_url.rstrip("/")
         # Current version/locale of the build, used as defaults when not overridden in the link.
-        self._env_version = os.environ.get("READTHEDOCS_VERSION")
-        self._env_language = os.environ.get("READTHEDOCS_LANGUAGE")
-        if not self._env_version or not self._env_language:
+        self._env_version = os.environ.get("READTHEDOCS_VERSION", "")
+        self._env_language = os.environ.get("READTHEDOCS_LANGUAGE", "")
+        if (not self._env_version or not self._env_language) and not self.is_serving:
             raise ConfigurationError(
                 "The 'resolve-absolute-urls' plugin requires the 'READTHEDOCS_VERSION' and "
                 "'READTHEDOCS_LANGUAGE' environment variables to be set."

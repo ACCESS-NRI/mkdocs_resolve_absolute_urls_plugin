@@ -19,8 +19,9 @@ def mock_plugin_config():
 def create_plugin(mock_plugin_config):
     """Factory function to create the plugin with the prescribed configuration options."""
 
-    def _plugin(config=mock_plugin_config, **kwargs):
+    def _plugin(config=mock_plugin_config, command="build", **kwargs):
         plugin = ResolveAbsoluteUrlsPlugin()
+        plugin.on_startup(command=command, dirty=False)
         plugin.load_config(config)
         for key, value in kwargs.items():
             setattr(plugin, key, value)
@@ -299,6 +300,43 @@ def test_on_config_raises_when_readthedocs_language_empty(create_plugin, monkeyp
 
     with pytest.raises(ConfigurationError):
         plugin.on_config(MagicMock())
+
+
+def test_on_config_does_not_raise_when_serving_locally(create_plugin, monkeypatch):
+    """Test that a missing `root_url`/READTHEDOCS_* env vars don't raise, and are treated as
+    empty, when running `mkdocs serve` for local builds."""
+    monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
+    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
+    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+
+    plugin = create_plugin(
+        {"attributes": ["src"], "prefix": "/"}, 
+        command="serve"
+    )
+    plugin.on_config(MagicMock())
+
+    assert plugin._root_url == ""
+    assert plugin._env_version == ""
+    assert plugin._env_language == ""
+
+
+def test_on_post_page_serving_locally_without_env_vars(create_plugin, monkeypatch):
+    """Test that absolute links are left root-relative, without locale/version segments,
+    when serving locally without any Read the Docs env vars set."""
+    monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
+    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
+    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
+
+    plugin = create_plugin({"attributes": ["src"], "prefix": "/"}, command="serve")
+    page = MagicMock()
+    config = MagicMock()
+
+    output = '<img src="/image.png">'
+    expected_result = '<img src="/image.png">'
+
+    plugin.on_config(config)
+    result = plugin.on_post_page(output, page, config)
+    assert result == expected_result
 
 
 def test_plugin_real_case(tmp_path, monkeypatch):
