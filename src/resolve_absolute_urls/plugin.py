@@ -1,6 +1,6 @@
 import os
 import re
-import sys
+from enum import Enum
 
 import mkdocs.plugins
 from mkdocs.config import config_options as c
@@ -9,18 +9,62 @@ from mkdocs.exceptions import ConfigurationError
 
 logger = mkdocs.plugins.get_plugin_logger(__name__)
 
+class UrlVersioningScheme(Enum):
+    """
+    URL versioning schemes for the plugin configuration.
+    The values correspond to the different URL versioning schemes
+    supported by ReadTheDocs.
+    """
+    LOCALE_AND_VERSION = "multiple_versions_with_translations"
+    VERSION_ONLY = "multiple_versions_without_translations"
+    NONE = "single_version_without_translations"
 
 class Config(mkdocs.config.base.Config):
     root_url = c.Type(str, default="")
+    url_versioning_scheme = c.Choice(
+        [e.value for e in UrlVersioningScheme],
+        default=UrlVersioningScheme.NONE.value,
+    )
     attributes = c.Type(list, default=["href", "src", "data"])
     prefix = c.Type(str, default="/")
 
+def replace_locale(url, locale):
+    '''
+    Replace the locale segment in the given URL of format 
+    `.../locale/version` with the specified locale.
+
+    Args:
+        url (str): The original URL.
+        locale (str): The locale to replace in the URL.
+
+    Returns:
+        str: The URL with the locale replaced.
+    '''
+    parts = url.split("/")
+    parts[-2] = locale
+    return "/".join(parts)
+
+def replace_version(url, version):
+    '''
+    Replace the version segment in the given URL of format 
+    `.../locale/version` with the specified version.
+
+    Args:
+        url (str): The original URL.
+        version (str): The version to replace in the URL.
+
+    Returns:
+        str: The URL with the version replaced.
+    '''
+    parts = url.split("/")
+    parts[-1] = version
+    return "/".join(parts)
 
 class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
-    # Matches an optional `!locale` and/or `@version` override at the start of a
-    # resolved absolute url, e.g. `!fr/@v2.0/my/page` -> locale="fr", version="v2.0", path="my/page"
+    # Matches an optional `!locale` and/or `@version` override at the start of an absolute url, 
+    # e.g. `!fr/@v2.0/my/page` -> locale="fr", version="v2.0", link="my/page"
     _OVERRIDE_RE = re.compile(
-        r"^(?:!(?P<locale>[^/]+)/)?(?:@(?P<version>[^/]+)/)?(?P<path>.*)$", re.DOTALL
+        r"^(?:!(?P<locale>[^/]+)/)?(?:@(?P<version>[^/]+)/)?(?P<link>.*)$", re.DOTALL
     )
 
     def on_startup(self, *, command, dirty):
@@ -30,57 +74,88 @@ class ResolveAbsoluteUrlsPlugin(mkdocs.plugins.BasePlugin[Config]):
             self.is_serving = False
 
     def on_config(self, config: MkDocsConfig) -> MkDocsConfig:
+        # Define url regex
         attributes = (re.escape(attr) for attr in self.config["attributes"])
         self.prefix = re.escape(self.config["prefix"])
         regex_parts = [
-            r"(", # capturing group 1
+            r"(?P<attribute>", # capturing group for the attribute
             "|".join(attributes), # attributes
-            r")", # end of capturing group 1
+            r")", # end capturing group for the attribute
             r"\s*=\s*", # equals sign with optional whitespace
-            r"([\"'])", # quote with capturing group 2
+            r"(?P<quote>[\"'])", # capturing group for the quote
             self.prefix, # url prefix
-            r"([^\"']*)", # remainder of the url with capturing group 3
-            r"\2", # matching quote
+            r"(?P<remainder>[^\"']*)", # capturing group for the absolute url remainder
+            r"(?P=quote)", # matching quote
         ]
-        regex = "".join(regex_parts)
-        self._regex = re.compile(regex, re.IGNORECASE)
-
-        root_url = self.config["root_url"]
-        if not root_url:
-            root_url = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
-        if not root_url and not self.is_serving:
-            raise ConfigurationError(
-                "The 'resolve-absolute-urls' plugin requires a 'root_url' to be configured, "
-                "or the 'READTHEDOCS_CANONICAL_URL' environment variable to be set."
-            )
+        url_regex = "".join(regex_parts)
+        self.url_regex = re.compile(url_regex, re.IGNORECASE)
+        # root URL
+        if not self.is_serving:
+            root_url = self.config["root_url"]
+            # If root_url is not set, get it from the READTHEDOCS_CANONICAL_URL env variable
+            if not root_url:
+                root_url = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
+                if not root_url:
+                    raise ConfigurationError(
+                        "The 'resolve-absolute-urls' plugin requires a 'root_url' to be configured, "
+                        "or the 'READTHEDOCS_CANONICAL_URL' environment variable to be set and non-empty."
+                    )
+        else:
+            root_url = ""
         self._root_url = root_url.rstrip("/")
-        # Current version/locale of the build, used as defaults when not overridden in the link.
-        self._env_version = os.environ.get("READTHEDOCS_VERSION", "")
-        self._env_language = os.environ.get("READTHEDOCS_LANGUAGE", "")
-        if (not self._env_version or not self._env_language) and not self.is_serving:
-            raise ConfigurationError(
-                "The 'resolve-absolute-urls' plugin requires the 'READTHEDOCS_VERSION' and "
-                "'READTHEDOCS_LANGUAGE' environment variables to be set."
-            )
+        self._url_versioning_scheme = UrlVersioningScheme(self.config["url_versioning_scheme"])
         return config
 
     def on_post_page(self, output, page, config):
         def _replacer(match):
-            attribute = match.group(1)
-            remainder = match.group(3)
+            """
+            Replacer function for the URL regex.
+
+            This function is called for each match of the URL regex in the HTML output.
+            It extracts the attribute, quote, and remainder of the URL, applies any locale
+            or version overrides, and constructs the resolved absolute URL.
+            """
+            attribute = match.group("attribute")
+            remainder = match.group("remainder")
             override = self._OVERRIDE_RE.match(remainder)
-            locale = override.group("locale") or self._env_language
-            version = override.group("version") or self._env_version
-            path = override.group("path")
+            locale_override = override.group("locale")
+            version_override = override.group("version")
+            link = override.group("link")
 
-            segments = [self._root_url]
-            if locale:
-                segments.append(locale)
-            if version:
-                segments.append(version)
-            new_url = "/".join(segments) + "/" + path
+            absolute_url = f"{self.prefix}{remainder}"
+            root_url = self._root_url
 
-            logger.info(f"Replacing absolute url '{self.prefix}{remainder}' with '{new_url}'")
-            return f'{attribute}="{new_url}"'
+            # If not running `mkdocs serve`, apply local and version overrides
+            if not self.is_serving:
+                if locale_override:
+                    if self._url_versioning_scheme is UrlVersioningScheme.LOCALE_AND_VERSION:
+                        root_url = replace_locale(root_url, locale_override)
+                    else:
+                        msg = (
+                            f"The locale override {locale_override!r} has been detected in the absolute URL "
+                            f"{absolute_url!r}, but the current URL versioning scheme "
+                            f"{self._url_versioning_scheme!r} does not include any locale. Make sure "
+                            "the resulting resolved URL is correct!\n"
+                            "To change URL versioning scheme, set or update the "
+                            "'url_versioning_scheme' configuration option."
+                        )
+                        logger.warning(msg)
+                if version_override:
+                    if self._url_versioning_scheme is not UrlVersioningScheme.NONE:
+                        root_url = replace_version(root_url, version_override)
+                    else:
+                        msg = (
+                            f"The version override {version_override!r} has been detected in the absolute URL "
+                            f"{absolute_url!r}, but the current URL versioning scheme "
+                            f"{self._url_versioning_scheme!r} does not include any version. Make sure "
+                            "the resulting resolved URL is correct!\n"
+                            "To change URL versioning scheme, set or update the "
+                            "'url_versioning_scheme' configuration option."
+                        )
+                        logger.warning(msg)
+            # Construct the resolved URL
+            resolved_url=root_url + '/' + link
+            logger.info(f"Replaced absolute url {absolute_url!r} with '{resolved_url}'")
+            return f'{attribute}="{resolved_url}"'
 
-        return self._regex.sub(_replacer, output)
+        return self.url_regex.sub(_replacer, output)

@@ -1,37 +1,68 @@
+import logging
 import re
-import textwrap
+from unittest.mock import MagicMock
 
 import pytest
 
-from unittest.mock import MagicMock
-
-from mkdocs.commands.build import build
-from mkdocs.config import load_config
 from mkdocs.exceptions import ConfigurationError
-from resolve_absolute_urls.plugin import ResolveAbsoluteUrlsPlugin
+from resolve_absolute_urls.plugin import (
+    ResolveAbsoluteUrlsPlugin,
+    logger,
+    replace_locale,
+    replace_version,
+)
+
 
 @pytest.fixture
-def mock_plugin_config():
-    return {"attributes": ["src", "href"], "prefix": "/", "root_url": "/docs"}
+def default_plugin_config():
+    return {
+        "attributes": None, 
+        "prefix": None, 
+        "root_url": None,
+        "url_versioning_scheme": None,
+    }
 
 
 @pytest.fixture
-def create_plugin(mock_plugin_config):
+def create_plugin(default_plugin_config,monkeypatch):
     """Factory function to create the plugin with the prescribed configuration options."""
 
-    def _plugin(config=mock_plugin_config, command="build", **kwargs):
+    def _plugin(
+        config=default_plugin_config, 
+        command="build"
+    ):
         plugin = ResolveAbsoluteUrlsPlugin()
         plugin.on_startup(command=command, dirty=False)
         plugin.load_config(config)
-        for key, value in kwargs.items():
-            setattr(plugin, key, value)
         return plugin
 
     return _plugin
 
 
+def test_replace_locale():
+    assert replace_locale("/my/example/en/v1.0", "locale") == "/my/example/locale/v1.0"
+
+def test_replace_version():
+    assert replace_version("/my/example/en/v1.0", "v1") == "/my/example/en/v1"
+
 @pytest.mark.parametrize(
-    "attributes, prefix, string_to_match, match_group1, match_group3, should_match",
+    "command",
+    ["build", "serve"],
+    ids=["build", "serve"]
+)
+@pytest.mark.parametrize(
+    "root_url_config, url_env_var",
+    [
+        ("https://example.com/it/v1.0", None),
+        (None, "https://example.com/it/v1.0"),
+    ],
+    ids=[
+        "root_url_config",
+        "root_url_env",
+    ]
+)
+@pytest.mark.parametrize(
+    "attributes, prefix, string_to_match, match_attribute, match_remainder, should_match",
     [
         (
             ["href", "src"],
@@ -91,308 +122,361 @@ def create_plugin(mock_plugin_config):
         "invalid_different_attribute",
     ],
 )
-def test_on_config_sets_regex(
-    create_plugin,
-    monkeypatch,
-    attributes,
-    prefix,
-    string_to_match,
-    match_group1,
-    match_group3,
-    should_match,
+def test_regex(
+    create_plugin, monkeypatch, command, attributes, prefix, root_url_config, url_env_var,
+    string_to_match, match_attribute, match_remainder, should_match,
 ):
-    """Test the on_config method of the ResolveAbsoluteUrlsPlugin."""
-    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
+    """Test the regex int the on_config method of the ResolveAbsoluteUrlsPlugin."""
 
     plugin_config = {
         "attributes": attributes,
         "prefix": prefix,
         "root_url": "/docs",
     }
-    plugin = create_plugin(plugin_config)
+    plugin = create_plugin(plugin_config, command=command)
+
+    if command == "build":
+        assert plugin.is_serving is False
+    else:
+        assert plugin.is_serving is True
+
     plugin.on_config(MagicMock())
 
     # Check that the regex is compiled
-    assert isinstance(plugin._regex, re.Pattern)
-    match = plugin._regex.search(string_to_match)
-
+    assert isinstance(plugin.url_regex, re.Pattern)
+    
     # Check regex is correct
+    match = plugin.url_regex.search(string_to_match)
     if should_match:
         assert match is not None
-        assert match.group(1) == match_group1
-        assert match.group(3) == match_group3
+        assert match.group("attribute") == match_attribute
+        assert match.group("remainder") == match_remainder
     else:
         assert match is None
 
+
 @pytest.mark.parametrize(
-    "env_version, env_language, link, expected_link",
+    "command",
+    ["build", "serve"],
+    ids=["build", "serve"]
+)
+def test_no_root_url_no_env(create_plugin, default_plugin_config, monkeypatch, command):
+    """Test the plugin behavior when no root URL and no environment variables are set."""
+    monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
+    plugin = create_plugin(default_plugin_config, command=command)
+    if command == "build":
+        assert plugin.is_serving is False
+        with pytest.raises(ConfigurationError):
+            plugin.on_config(MagicMock())
+    else:
+        assert plugin.is_serving is True
+        plugin.on_config(MagicMock())
+        # Check that the absolute links remain unchanged when serving
+        result = plugin.on_post_page('<img src="/my/abs/link" alt="Image">', MagicMock(), MagicMock())
+        assert result == '<img src="/my/abs/link" alt="Image">'
+
+
+def test_url_root_precedence_over_env(create_plugin, monkeypatch):
+    """Test the plugin behavior when a root URL is set and environment variables are present."""
+    monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "www.myexamplesitefromenv.com/")
+    plugin = create_plugin({"root_url": "www.myexamplesitefromroot_url.com/"})
+    plugin.on_config(MagicMock())
+    
+    html_input = '<img src="/my/abs/link" alt="Image">'
+    expected_result = '<img src="www.myexamplesitefromroot_url.com/my/abs/link" alt="Image">'
+
+    result = plugin.on_post_page(html_input, MagicMock(), MagicMock())
+    assert result == expected_result
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["build","serve"],
+    ids=["build","serve"]
+)
+@pytest.mark.parametrize(
+    "root_url_config, url_env_var",
+    [
+        ("https://example.com/it/v1.0", None),
+        (None, "https://example.com/it/v1.0"),
+    ],
+    ids=[
+        "root_url_config",
+        "root_url_env",
+    ]
+)
+@pytest.mark.parametrize(
+    "absolute_url, expected_resolved_url, warn",
     [
         (
-            "v2.0",
-            "fr",
             "/my/absolute/link.png",
-            "/docs/fr/v2.0/my/absolute/link.png",
-        ),  # version_and_locale_from_env
+            "https://example.com/it/v1.0/my/absolute/link.png",
+            False,
+        ),  # no_overrides
         (
-            "v2.0",
-            "fr",
             "/!de/my/absolute/link.png",
-            "/docs/de/v2.0/my/absolute/link.png",
-        ),  # locale_override_only
+            "https://example.com/de/v1.0/my/absolute/link.png",
+            False,
+        ),  # locale_override
         (
-            "v2.0",
-            "fr",
             "/@v3.0/my/absolute/link.png",
-            "/docs/fr/v3.0/my/absolute/link.png",
-        ),  # version_override_only
+            "https://example.com/it/v3.0/my/absolute/link.png",
+            False,
+        ),  # version_override
         (
-            "v2.0",
-            "fr",
             "/!de/@v3.0/my/absolute/link.png",
-            "/docs/de/v3.0/my/absolute/link.png",
+            "https://example.com/de/v3.0/my/absolute/link.png",
+            False,
         ),  # locale_and_version_override
     ],
     ids=[
-        "version_and_locale_from_env",
-        "locale_override_only",
-        "version_override_only",
+        "no_overrides",
+        "locale_override",
+        "version_override",
         "locale_and_version_override",
     ],
 )
-def test_on_post_page(
-    create_plugin, monkeypatch, env_version, env_language, link, expected_link
+def test_resolve_absolute_urls_with_overrides_url_scheme_multiple_versions_with_translations(
+    create_plugin, default_plugin_config, root_url_config, monkeypatch,
+    url_env_var, absolute_url, expected_resolved_url, warn, caplog, command
 ):
-    """Test the on_post_page method resolves the current/overridden version and locale."""
-    monkeypatch.setenv("READTHEDOCS_VERSION", env_version)
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", env_language)
+    """
+    Test that the plugin resolves the absolute URLs correctly even with locale
+    or version overrides, for URL versioning scheme "multiple_versions_with_translations",
+    for root_url set either via the plugin configuration or the environment variable.
+    """
+    serve_expected_url = "/my/absolute/link.png"
+    url_versioning_scheme = "multiple_versions_with_translations"
+    plugin_config = {
+        "root_url": root_url_config,
+        "url_versioning_scheme": url_versioning_scheme
+    }
+    if url_env_var:
+        monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", url_env_var)
+    else:
+        monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
+    html_input = f'<img src="{absolute_url}" alt="Image">'
+    expected_result = f'<img src="{expected_resolved_url if command == "build" else serve_expected_url}" alt="Image">'
 
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
-    page = MagicMock()
-    config = MagicMock()
-
-    output = f'<img src="{link}" alt="Image">'
-    expected_result = f'<img src="{expected_link}" alt="Image">'
-
-    plugin.on_config(config)
-    result = plugin.on_post_page(output, page, config)
+    plugin = create_plugin(plugin_config, command=command)
+    if command == "build":
+        assert plugin.is_serving is False
+    else:
+        assert plugin.is_serving is True
+    plugin.on_config(plugin_config)
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        result = plugin.on_post_page(html_input, MagicMock(), MagicMock())
     assert result == expected_result
+    if warn and command == "build":
+        assert "Make sure the resulting resolved URL is correct!" in caplog.text
+    else:
+        assert caplog.text == ""
 
 
-def test_on_post_page_url_trailing_slash_is_ignored(create_plugin, monkeypatch):
-    """Test that a trailing slash on the `root_url` option does not affect the result."""
-    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs/"})
-    page = MagicMock()
-    config = MagicMock()
-
-    output = '<img src="/image.png">'
-    expected_result = '<img src="/docs/en/v1.0/image.png">'
-
-    plugin.on_config(config)
-    result = plugin.on_post_page(output, page, config)
+@pytest.mark.parametrize(
+    "command",
+    ["build", "serve"],
+    ids=["build", "serve"]
+)
+@pytest.mark.parametrize(
+    "root_url_config, url_env_var",
+    [
+        ("https://example.com/v1.0", None),
+        (None, "https://example.com/v1.0"),
+    ],
+    ids=[
+        "root_url_config",
+        "root_url_env",
+    ]
+)
+@pytest.mark.parametrize(
+    "absolute_url, expected_resolved_url, warn",
+    [
+        (
+            "/my/absolute/link.png",
+            "https://example.com/v1.0/my/absolute/link.png",
+            False,
+        ),  # no_overrides
+        (
+            "/!de/my/absolute/link.png",
+            "https://example.com/v1.0/my/absolute/link.png",
+            True,
+        ),  # locale_override
+        (
+            "/@v3.0/my/absolute/link.png",
+            "https://example.com/v3.0/my/absolute/link.png",
+            False,
+        ),  # version_override
+        (
+            "/!de/@v3.0/my/absolute/link.png",
+            "https://example.com/v3.0/my/absolute/link.png",
+            True,
+        ),  # locale_and_version_override
+    ],
+    ids=[
+        "no_overrides",
+        "locale_override",
+        "version_override",
+        "locale_and_version_override",
+    ],
+)
+def test_resolve_absolute_urls_with_overrides_url_scheme_multiple_versions_without_translations(
+    create_plugin, default_plugin_config, root_url_config, monkeypatch,
+    url_env_var, absolute_url, expected_resolved_url, warn, caplog, command
+):
+    """
+    Test that the plugin resolves the absolute URLs correctly even with locale
+    or version overrides, for URL versioning scheme "multiple_versions_with_translations",
+    for root_url set either via the plugin configuration or the environment variable.
+    """
+    serve_expected_url = "/my/absolute/link.png"
+    url_versioning_scheme = "multiple_versions_without_translations"
+    plugin_config = {
+        "root_url": root_url_config,
+        "url_versioning_scheme": url_versioning_scheme
+    }
+    if url_env_var:
+        monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", url_env_var)
+    else:
+        monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
+    html_input = f'<img src="{absolute_url}" alt="Image">'
+    expected_result = f'<img src="{expected_resolved_url if command == "build" else serve_expected_url}" alt="Image">'
+    plugin = create_plugin(plugin_config, command=command)
+    if command == "build":
+        assert plugin.is_serving is False
+    else:
+        assert plugin.is_serving is True
+    plugin.on_config(plugin_config)
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        result = plugin.on_post_page(html_input, MagicMock(), MagicMock())
     assert result == expected_result
+    if warn and command == "build":
+        assert "Make sure the resulting resolved URL is correct!" in caplog.text
+    else:
+        assert caplog.text == ""
 
 
-def test_on_post_page_unmatched_attributes_are_untouched(create_plugin, monkeypatch):
-    """Test that attributes/urls not matching the plugin configuration are left as-is."""
-    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
+@pytest.mark.parametrize(
+    "command",
+    ["build", "serve"],
+    ids=["build", "serve"]
+)
+@pytest.mark.parametrize(
+    "root_url_config, url_env_var",
+    [
+        ("https://example.com/", None),
+        (None, "https://example.com/"),
+    ],
+    ids=[
+        "root_url_config",
+        "root_url_env",
+    ]
+)
+@pytest.mark.parametrize(
+    "absolute_url, expected_resolved_url, warn",
+    [
+        (
+            "/my/absolute/link.png",
+            "https://example.com/my/absolute/link.png",
+            False,
+        ),  # no_overrides
+        (
+            "/!de/my/absolute/link.png",
+            "https://example.com/my/absolute/link.png",
+            True,
+        ),  # locale_override
+        (
+            "/@v3.0/my/absolute/link.png",
+            "https://example.com/my/absolute/link.png",
+            True,
+        ),  # version_override
+        (
+            "/!de/@v3.0/my/absolute/link.png",
+            "https://example.com/my/absolute/link.png",
+            True,
+        ),  # locale_and_version_override
+    ],
+    ids=[
+        "no_overrides",
+        "locale_override",
+        "version_override",
+        "locale_and_version_override",
+    ],
+)
+def test_resolve_absolute_urls_with_overrides_url_scheme_single_version_without_translations(
+    create_plugin, default_plugin_config, root_url_config, monkeypatch,
+    url_env_var, absolute_url, expected_resolved_url, warn, caplog, command
+):
+    """
+    Test that the plugin resolves the absolute URLs correctly even with locale
+    or version overrides, for URL versioning scheme "single_version_without_translations",
+    for root_url set either via the plugin configuration or the environment variable.
+    """
+    serve_expected_url = "/my/absolute/link.png"
+    url_versioning_scheme = "single_version_without_translations"
+    plugin_config = {
+        "root_url": root_url_config,
+        "url_versioning_scheme": url_versioning_scheme
+    }
+    if url_env_var:
+        monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", url_env_var)
+    else:
+        monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
+    html_input = f'<img src="{absolute_url}" alt="Image">'
+    expected_result = f'<img src="{expected_resolved_url if command == "build" else serve_expected_url}" alt="Image">'
+    
+    plugin = create_plugin(plugin_config, command=command)
+    if command == "build":
+        assert plugin.is_serving is False
+    else:
+        assert plugin.is_serving is True
+    plugin.on_config(plugin_config)
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        result = plugin.on_post_page(html_input, MagicMock(), MagicMock())
+    assert result == expected_result
+    if warn and command == "build":
+        assert "Make sure the resulting resolved URL is correct!" in caplog.text
+    else:
+        assert caplog.text == ""
 
-    plugin = create_plugin({"attributes": ["data"], "prefix": "prefix", "root_url": "/docs"})
-    page = MagicMock()
-    config = MagicMock()
 
-    output = '''
+@pytest.mark.parametrize(
+    "root_url_config, url_env_var",
+    [
+        ("https://example.com/", None),
+        (None, "https://example.com/"),
+    ],
+    ids=[
+        "root_url_config",
+        "root_url_env",
+    ]
+)
+def test_unmatched_attributes_are_untouched(
+    create_plugin, default_plugin_config, monkeypatch,
+    root_url_config, url_env_var
+):
+    """Test that urls not matching are left as-is."""
+    plugin_config = {
+        "root_url": root_url_config,
+        "attributes": ["src"],
+        "prefix": "prefix/",
+    }
+    if url_env_var:
+        monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", url_env_var)
+    else:
+        monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
+    html_input = '''
     <img data="site:docs/image.svg" class="example">
-    <img attr  ="prefix/docs/image.png" >
+    <img src="prefix/docs/image.png" >
+    <img data="prefix/docs/image.png" >
     '''
-
-    plugin.on_config(config)
-    result = plugin.on_post_page(output, page, config)
-    assert result == output
-
-
-def test_on_config_falls_back_to_readthedocs_canonical_url(create_plugin, monkeypatch):
-    """Test that `root_url` defaults to the READTHEDOCS_CANONICAL_URL env var when not configured."""
-    monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "https://example.com/docs/")
-    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/"})
-    page = MagicMock()
-    config = MagicMock()
-
-    output = '<img src="/image.png">'
-    expected_result = '<img src="https://example.com/docs/en/v1.0/image.png">'
-
-    plugin.on_config(config)
-    result = plugin.on_post_page(output, page, config)
+    expected_result = '''
+    <img data="site:docs/image.svg" class="example">
+    <img src="https://example.com/docs/image.png" >
+    <img data="prefix/docs/image.png" >
+    '''
+    
+    plugin = create_plugin(plugin_config)
+    plugin.on_config(plugin_config)
+    result = plugin.on_post_page(html_input, MagicMock(), MagicMock())
     assert result == expected_result
-
-
-def test_on_config_prefers_explicit_url_over_readthedocs_canonical_url(
-    create_plugin, monkeypatch
-):
-    """Test that an explicitly configured `root_url` takes precedence over the env var."""
-    monkeypatch.setenv("READTHEDOCS_CANONICAL_URL", "https://example.com/other/")
-    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
-
-    plugin.on_config(MagicMock())
-    assert plugin._root_url == "/docs"
-
-
-def test_on_config_raises_when_no_url_is_available(create_plugin, monkeypatch):
-    """Test that a ConfigurationError is raised when `root_url` is not configured and the
-    READTHEDOCS_CANONICAL_URL env var is not set."""
-    monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/"})
-
-    with pytest.raises(ConfigurationError):
-        plugin.on_config(MagicMock())
-
-
-def test_on_config_raises_when_readthedocs_version_missing(create_plugin, monkeypatch):
-    """Test that a ConfigurationError is raised when READTHEDOCS_VERSION is not set."""
-    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
-
-    with pytest.raises(ConfigurationError):
-        plugin.on_config(MagicMock())
-
-
-def test_on_config_raises_when_readthedocs_language_missing(create_plugin, monkeypatch):
-    """Test that a ConfigurationError is raised when READTHEDOCS_LANGUAGE is not set."""
-    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
-    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
-
-    with pytest.raises(ConfigurationError):
-        plugin.on_config(MagicMock())
-
-
-def test_on_config_raises_when_readthedocs_version_empty(create_plugin, monkeypatch):
-    """Test that a ConfigurationError is raised when READTHEDOCS_VERSION is set but empty."""
-    monkeypatch.setenv("READTHEDOCS_VERSION", "")
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
-
-    with pytest.raises(ConfigurationError):
-        plugin.on_config(MagicMock())
-
-
-def test_on_config_raises_when_readthedocs_language_empty(create_plugin, monkeypatch):
-    """Test that a ConfigurationError is raised when READTHEDOCS_LANGUAGE is set but empty."""
-    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.0")
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "")
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/", "root_url": "/docs"})
-
-    with pytest.raises(ConfigurationError):
-        plugin.on_config(MagicMock())
-
-
-def test_on_config_does_not_raise_when_serving_locally(create_plugin, monkeypatch):
-    """Test that a missing `root_url`/READTHEDOCS_* env vars don't raise, and are treated as
-    empty, when running `mkdocs serve` for local builds."""
-    monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
-    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
-    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
-
-    plugin = create_plugin(
-        {"attributes": ["src"], "prefix": "/"}, 
-        command="serve"
-    )
-    plugin.on_config(MagicMock())
-
-    assert plugin._root_url == ""
-    assert plugin._env_version == ""
-    assert plugin._env_language == ""
-
-
-def test_on_post_page_serving_locally_without_env_vars(create_plugin, monkeypatch):
-    """Test that absolute links are left root-relative, without locale/version segments,
-    when serving locally without any Read the Docs env vars set."""
-    monkeypatch.delenv("READTHEDOCS_CANONICAL_URL", raising=False)
-    monkeypatch.delenv("READTHEDOCS_VERSION", raising=False)
-    monkeypatch.delenv("READTHEDOCS_LANGUAGE", raising=False)
-
-    plugin = create_plugin({"attributes": ["src"], "prefix": "/"}, command="serve")
-    page = MagicMock()
-    config = MagicMock()
-
-    output = '<img src="/image.png">'
-    expected_result = '<img src="/image.png">'
-
-    plugin.on_config(config)
-    result = plugin.on_post_page(output, page, config)
-    assert result == expected_result
-
-
-def test_plugin_real_case(tmp_path, monkeypatch):
-    """Run the plugin through an actual `mkdocs build` on a versioned/localized
-    Read the Docs build, mixing several attributes, locale/version overrides
-    and links that should be left untouched."""
-    monkeypatch.setenv("READTHEDOCS_VERSION", "v1.2")
-    monkeypatch.setenv("READTHEDOCS_LANGUAGE", "en")
-
-    docs_dir = tmp_path / "docs"
-    docs_dir.mkdir()
-    (docs_dir / "index.md").write_text(
-        textwrap.dedent(
-            """\
-            # Home
-
-            ![Logo](/images/logo.png)
-
-            [Getting started](/guide/getting-started/)
-
-            [Getting started (French)](/!fr/guide/getting-started/)
-
-            [Migration guide](/@v2.0/guide/migration/)
-
-            [External link](https://example.com/external)
-
-            [Relative link](relative.md)
-            """
-        )
-    )
-    (docs_dir / "relative.md").write_text("# Relative page\n")
-
-    mkdocs_yml = tmp_path / "mkdocs.yml"
-    mkdocs_yml.write_text(
-        textwrap.dedent(
-            """\
-            site_name: Test site
-            docs_dir: docs
-            site_dir: site
-            plugins:
-              - resolve-absolute-urls:
-                  attributes: [href, src]
-                  prefix: /
-                  root_url: /docs
-            """
-        )
-    )
-
-    config = load_config(config_file=str(mkdocs_yml))
-    build(config)
-
-    output = (tmp_path / "site" / "index.html").read_text()
-
-    assert 'src="/docs/en/v1.2/images/logo.png"' in output
-    assert 'href="/docs/en/v1.2/guide/getting-started/"' in output
-    assert 'href="/docs/fr/v1.2/guide/getting-started/"' in output
-    assert 'href="/docs/en/v2.0/guide/migration/"' in output
-    assert 'href="https://example.com/external"' in output
-    assert 'href="relative/"' in output
