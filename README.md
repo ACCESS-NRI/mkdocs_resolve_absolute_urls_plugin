@@ -1,7 +1,21 @@
 # MkDocs resolve absolute URLs Plugin
 
-A MkDocs plugin that resolves absolute URLs relative to a configurable root url, with support for multi-version and multi-locale documentation sites.
+A MkDocs plugin that resolves absolute URLs relative to a configurable root url, with support for multi-version and multi-locale documentation sites based on the configurable url versioning scheme.
 Currently this only supports websites hosted through [Read the Docs](https://readthedocs.org/).
+
+## Overview
+- [Why do I need this](#why-do-i-need-this)
+- [How it works](#how-it-works)
+  - [Basic URL resolution](#basic-url-resolution)
+  - [Cross-locale and cross-version urls](#cross-locale-and-cross-version-urls)
+    - [Examples](#examples)
+- [Configuration options](#configuration-options)
+- [Usage examples](#usage-examples)
+  - [Basic setup](#basic-setup)
+  - [With custom settings](#with-custom-settings)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+
 
 ## Why do I need this
 Mkdocs doesn't natively support absolute links ([reference](https://github.com/mkdocs/mkdocs/issues/192)). In addition, when using documentation with multiple versions or locales (for example on ReadtheDocs), absolute URLs like `/docs/guide.html` become problematic. This plugin:
@@ -14,34 +28,44 @@ Mkdocs doesn't natively support absolute links ([reference](https://github.com/m
 
 ### Basic URL resolution
 
-The plugin resolves absolute URLs by prepending a base URL (either from your config or from the Read the Docs environment):
+The plugin resolves absolute URLs by prepending a root URL (either from your config or from the Read the Docs environment):
 
-| Absolute URL | Base URL | Result |
+| Absolute URL | Root URL | Result |
 |---|---|---|
 | `/bar/foo.png` | `https://mywebsite.com` | `https://mywebsite.com/bar/foo.png` |
 | `/bar/foo.png` | `https://mywebsite.com/subpage/` | `https://mywebsite.com/subpage/bar/foo.png` |
-| `/bar/foo.png` | *(from RTD env)* `https://docs.example.org` | `https://docs.example.org/bar/foo.png` |
 
-### Cross-locale and cross-version links
+If the root URL is not configured, it is taken from the `READTHEDOCS_CANONICAL_URL` environment variable.
 
-For multi-version/multi-locale sites, use an extended URL syntax to link to specific versions or locales:
+### Cross-locale and cross-version urls
 
-**URL Format:** `/[!<locale>/][@<version>/]<path>`
+For sites that enable multiple locales and/or multiple versions, you can add the `url_versioning_scheme` option and use an extended URL syntax to link to specific versions or locales:
 
-- `!<locale>` — Switch to a specific locale (optional)
-- `@<version>` — Switch to a specific version (optional)
+**URL Format:** `/!<locale>/@<version>/<link>`
+
+- `!<locale>`: Optional locale override to switch to a specific locale. Must be used with `url_versioning_scheme` set to `multiple_versions_with_translations`
+- `@<version>`: Optional version override to switch to a specific version. Must be used with `url_versioning_scheme` set to either `multiple_versions_with_translations` or `multiple_versions_without_translations`
 - Omit both to use the current locale/version (if present)
 
 #### Examples
 
-Given base URL `https://mywebsite.com`, current locale `en`, and current version `latest`:
+Given a root URL `https://mywebsite.com`, url versioning scheme `multiple_versions_with_translations`, current locale `en`, and current version `latest`:
 
 | URL | Resolves to |
 |---|---|
 | `/my/page` | `https://mywebsite.com/en/latest/my/page` *(current locale & version)* |
-| `/!fr/my/page` | `https://mywebsite.com/fr/latest/my/page` *(switch locale)* |
-| `/@v2.0/my/page` | `https://mywebsite.com/en/v2.0/my/page` *(switch version)* |
-| `/!fr/@v2.0/my/page` | `https://mywebsite.com/fr/v2.0/my/page` *(switch both)* |
+| `/!fr/my/page` | `https://mywebsite.com/fr/latest/my/page` *(locale override)* |
+| `/@v2.0/my/page` | `https://mywebsite.com/en/v2.0/my/page` *(version override)* |
+| `/!fr/@v2.0/my/page` | `https://mywebsite.com/fr/v2.0/my/page` *(locale and version override)* |
+
+## Configuration options
+
+| Option | Description | Default |
+|---|---|---|
+| `root_url` | Root URL to prepend resolved URLs to | `READTHEDOCS_CANONICAL_URL` environment variable |
+| `attributes` | HTML attributes containing the URLs to process | `["href", "src", "data"]` |
+| `prefix` | URL prefix to identify absolute URLs for processing | `/` |
+
 
 ## Usage examples
 
@@ -62,15 +86,8 @@ plugins:
         - href
         - data-url
       prefix: /abs/
+      url_versioning_scheme: multiple_versions_without_translations
 ```
-
-### Configuration options
-
-| Option | Description | Default |
-|---|---|---|
-| `root_url` | Base URL to prepend to resolved URLs | `READTHEDOCS_CANONICAL_URL` environment variable |
-| `attributes` | HTML attributes to process | `["href", "src", "data"]` |
-| `prefix` | URL prefix to identify absolute URLs for processing | `/` |
 
 ## License
 
