@@ -1,5 +1,0 @@
-[run]
-branch = True
-
-# skip coverage testing for external source files
-omit = src/*/_version.py
