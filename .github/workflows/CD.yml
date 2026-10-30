@@ -10,7 +10,7 @@ env:
 jobs:
   test:
     name: Run tests
-    uses: ./.github/workflows/pytest.yml
+    uses: ./.github/workflows/CI.yml
   
   version-sanity-check:
     name: Version sanity check
