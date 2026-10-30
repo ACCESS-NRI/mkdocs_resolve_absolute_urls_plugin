@@ -1,45 +1,21 @@
 name: CD
 
 on:
-    push:
-      tags:
-        - '**'
+  push:
+    tags:
+      - '**'
 env:
-  RELEASE_TAG_REGEX: ^[0-9]+\.[0-9]+\.[0-9]+$
+  ARTIFACT_DIR: dist_artifact
 
 jobs:
-  check-release-tag:
-    name: Check release tag
-    runs-on: ubuntu-latest
-    outputs:
-        is_release_tag: ${{ steps.check-tag.outputs.is_release_tag }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Check tag
-        id: check-tag
-        run: |
-          is_release_tag=true
-          tag='${{ github.ref_name }}'
-          if [[ ! "$tag" =~ ${{ env.RELEASE_TAG_REGEX }} ]]; then
-            echo "::warning::The tag '$tag' was not recognised as a release tag (MAJOR.MINOR.PATCH format). Therefore, no release was created."
-            is_release_tag=false
-          fi
-          echo "is_release_tag=$is_release_tag" >> $GITHUB_OUTPUT
-    
+  test:
+    name: Run tests
+    uses: ./.github/workflows/pytest.yml
+  
   version-sanity-check:
     name: Version sanity check
-    needs: [check-release-tag]
-    if: ${{ needs.check-release-tag.outputs.is_release_tag == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.ref }}
-          fetch-tags: true
-
       - name: Check version
         uses: access-nri/actions/.github/actions/version-check@main
         with: 
@@ -47,52 +23,60 @@ jobs:
 
   get-package-name:
     name: Get package name
-    needs: [check-release-tag]
-    if: ${{ needs.check-release-tag.outputs.is_release_tag == 'true' }}
     runs-on: ubuntu-latest
     outputs:
-        package-name: ${{ steps.get-package-name.outputs.package-name }}
+      package-name: ${{ steps.get-package-name.outputs.package-name }}
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v6
-
+      - uses: actions/checkout@v7
+      
       - name: Get name
         id: get-package-name
-        run: |
-          echo "package-name=$(yq '.project.name' pyproject.toml)" >> $GITHUB_OUTPUT
+        run: echo "package-name=$(yq '.project.name' pyproject.toml)" >> $GITHUB_OUTPUT
+  
+  publish-python-package:
+    name: Publish Python Package
+    uses: access-nri/actions/.github/workflows/publish-python-package.yml@main
+    needs: [test, version-sanity-check]
+    secrets: inherit
+    permissions:
+      actions: write
 
-  create-release:
-    name: Create release
-    needs: [check-release-tag, version-sanity-check, get-package-name]
-    if: ${{ needs.check-release-tag.outputs.is_release_tag == 'true' }}
+  create-github-release:
+    name: Create GitHub Release
     runs-on: ubuntu-latest
+    needs: [get-package-name, publish-python-package]
     permissions:
       contents: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Download artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.publish-python-package.outputs.artifact-name }}
+          merge-multiple: true
+          path: ${{ env.ARTIFACT_DIR }}
 
       - name: Create Release
-        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 #v2.0.8
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 #v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          name: ${{ needs.get-package-name.outputs.package-name }} ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-
+          files: ${{ env.ARTIFACT_DIR }}/*
+    
   cleanup-on-failure:
     name: Cleanup on failure
     runs-on: ubuntu-latest
-    needs: create-release
+    needs: create-github-release
     # Run this job if any of the previous jobs failed, or if the workflow was cancelled
-    if: always() && needs.create-release.result != 'success'
+    if: ( always() && failure() ) || cancelled()
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-tags: true
           fetch-depth: 0 
