@@ -2,10 +2,14 @@
 name = "mkdocs-resolve-absolute-urls-plugin"
 dynamic = ["version"]
 authors = [
-  {name = "Davide Marchegiani", email="davide.marchegiani@anu.edu.au"},
+    {name = "Davide Marchegiani", email="davide.marchegiani@anu.edu.au"},
 ]
-description = "A MkDocs plugin to resolve absolute URLs relative to the `site_url` value in the MkDocs configuration, rather than the root url of the website."
+maintainers = [
+    { name = "ACCESS-NRI", email = "access.nri@anu.edu.au" }
+]
+description = "A MkDocs plugin that resolves absolute URLs relative to a configurable root url, with support for multi-version and multi-locale documentation sites based on the configurable url versioning scheme."
 license = { file = "LICENSE" }
+readme = "README.md"
 keywords = ["mkdocs", "plugin", "mkdocs plugin", "access-nri"]
 requires-python = ">=3.10"
 dependencies = [
